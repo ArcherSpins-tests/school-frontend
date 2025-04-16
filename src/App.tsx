@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Students } from './pages'
+import { Homeworks, Students } from './pages'
 import { Sidebar } from './components'
 import { useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
@@ -601,6 +601,7 @@ function App() {
           <Route path="/chats" element={<ChatsPage />} />
           <Route path="/classes" element={<ClassesPage />} />
           <Route path="/top-students" element={<TopStudentsPage />} />
+          <Route path="/homeworks" element={<Homeworks />} />
         </Routes>
       </div>
     </Router>
