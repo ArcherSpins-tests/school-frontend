@@ -13,6 +13,7 @@ import {
   Star,
   User,
   LayoutList,
+  BookAudio,
 } from 'lucide-react'
 
 interface RouteItem {
@@ -50,6 +51,7 @@ const routes: RouteItem[] = [
     ],
   },
   { label: 'Homeworks', path: '/homeworks', icon: ClipboardList },
+  { label: 'Courses', path: '/courses', icon: BookAudio },
   { label: 'About', path: '/about', icon: Info },
 ]
 

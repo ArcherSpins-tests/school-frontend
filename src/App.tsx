@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Homeworks, Students } from './pages'
+import { AuthPage, Course, Courses, Homeworks, Students } from './pages'
 import { Sidebar } from './components'
 import { useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
@@ -593,6 +593,7 @@ function App() {
       <div className="flex h-full gap-3 p-2">
         <Sidebar />
         <Routes>
+          <Route path="/login" element={<AuthPage />} />
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
           <Route path="/students" element={<Students />} />
@@ -602,6 +603,8 @@ function App() {
           <Route path="/classes" element={<ClassesPage />} />
           <Route path="/top-students" element={<TopStudentsPage />} />
           <Route path="/homeworks" element={<Homeworks />} />
+          <Route path="/courses" element={<Courses />} />
+          <Route path="/courses/:id" element={<Course />} />
         </Routes>
       </div>
     </Router>

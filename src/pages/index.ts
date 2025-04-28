@@ -1,2 +1,5 @@
 export { Students } from './Students/Students'
 export { Homeworks } from './Homeworks/Homeworks'
+export { AuthPage } from './Login/Login'
+export { Courses } from './Courses/Courses'
+export { Course } from './Courses/Course'
