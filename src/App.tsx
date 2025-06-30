@@ -455,17 +455,39 @@ const ChatsPage: React.FC = () => {
   const peerConnection = useRef<RTCPeerConnection | null>(null)
   const [isCaller, setIsCaller] = useState(false)
 
+  // Слушаем изменения в localStorage для обмена сигналами
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream
-    }
-  }, [localStream])
+    const handleStorage = async (event: StorageEvent) => {
+      if (!event.newValue) return
 
-  useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream
+      const data = JSON.parse(event.newValue)
+      
+      if (event.key === 'offer' && !isCaller) {
+        const pc = setupPeerConnection()
+        await pc.setRemoteDescription(new RTCSessionDescription(data))
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        localStorage.setItem('answer', JSON.stringify(answer))
+      }
+      
+      if (event.key === 'answer' && isCaller) {
+        const pc = peerConnection.current
+        if (pc) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data))
+        }
+      }
+
+      if (event.key === 'ice-candidate') {
+        const pc = peerConnection.current
+        if (pc) {
+          await pc.addIceCandidate(new RTCIceCandidate(data))
+        }
+      }
     }
-  }, [remoteStream])
+
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [isCaller])
 
   const setupPeerConnection = () => {
     const pc = new RTCPeerConnection({
@@ -474,12 +496,12 @@ const ChatsPage: React.FC = () => {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        // В реальном приложении здесь мы бы отправляли кандидата другому пиру через сервер
-        console.log('New ICE candidate:', event.candidate)
+        localStorage.setItem('ice-candidate', JSON.stringify(event.candidate))
       }
     }
 
     pc.ontrack = (event) => {
+      console.log('Received remote stream:', event.streams[0])
       setRemoteStream(event.streams[0])
     }
 
@@ -495,6 +517,11 @@ const ChatsPage: React.FC = () => {
 
   const handleStartCall = async () => {
     try {
+      // Очищаем предыдущие сигнальные данные
+      localStorage.removeItem('offer')
+      localStorage.removeItem('answer')
+      localStorage.removeItem('ice-candidate')
+
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       setLocalStream(stream)
       setCallOpen(true)
@@ -502,12 +529,10 @@ const ChatsPage: React.FC = () => {
 
       const pc = setupPeerConnection()
       
-      // Создаем оффер (для демонстрации)
+      // Создаем и отправляем оффер
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-      
-      // В реальном приложении здесь мы бы отправляли оффер другому пиру через сервер
-      console.log('Created offer:', offer)
+      localStorage.setItem('offer', JSON.stringify(offer))
       
     } catch (err) {
       console.error('Error accessing media devices:', err)
@@ -522,11 +547,21 @@ const ChatsPage: React.FC = () => {
       setCallOpen(true)
       setIsCaller(false)
 
-      setupPeerConnection()
+      // Получаем существующий оффер
+      const offerStr = localStorage.getItem('offer')
+      if (!offerStr) {
+        alert('通話が見つかりません。先に通話を開始してください。')
+        return
+      }
+
+      const pc = setupPeerConnection()
+      const offer = JSON.parse(offerStr)
       
-      // В реальном приложении здесь мы бы получали оффер от другого пира и создавали ответ
-      // Для демонстрации просто показываем, что второй участник присоединился
-      console.log('Second participant joined')
+      // Устанавливаем удаленное описание и создаем ответ
+      await pc.setRemoteDescription(new RTCSessionDescription(offer))
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      localStorage.setItem('answer', JSON.stringify(answer))
       
     } catch (err) {
       console.error('Error accessing media devices:', err)
@@ -546,7 +581,25 @@ const ChatsPage: React.FC = () => {
     setRemoteStream(null)
     setCallOpen(false)
     setIsCaller(false)
+
+    // Очищаем сигнальные данные
+    localStorage.removeItem('offer')
+    localStorage.removeItem('answer')
+    localStorage.removeItem('ice-candidate')
   }
+
+  // Add back video ref effects
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream
+    }
+  }, [remoteStream])
 
   return (
     <div className="flex min-h-full w-full overflow-y-auto rounded-lg bg-white text-gray-900">
