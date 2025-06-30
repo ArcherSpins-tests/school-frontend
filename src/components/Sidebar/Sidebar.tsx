@@ -14,6 +14,7 @@ import {
   User,
   LayoutList,
   BookAudio,
+  Kanban,
 } from 'lucide-react'
 
 interface RouteItem {
@@ -52,6 +53,8 @@ const routes: RouteItem[] = [
   },
   { label: 'Homeworks', path: '/homeworks', icon: ClipboardList },
   { label: 'Courses', path: '/courses', icon: BookAudio },
+  { label: 'Kanban Board', path: '/kanban', icon: Kanban },
+  { label: 'Resume', path: '/resume', icon: BookAudio },
   { label: 'About', path: '/about', icon: Info },
 ]
 

@@ -13,3 +13,16 @@ body,
 body {
   background-color: rgb(233, 233, 233);
 }
+
+.fade-out {
+  animation: fadeOut 1s ease-in-out forwards;
+}
+
+@keyframes fadeOut {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

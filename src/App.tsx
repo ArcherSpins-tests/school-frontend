@@ -1,9 +1,11 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { AuthPage, Course, Courses, Homeworks, Students } from './pages'
+import { AnimatePresence, motion } from 'framer-motion'
+import { AuthPage, Course, Courses, Homeworks, Resume, Students } from './pages'
 import { Sidebar } from './components'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import KanbanBoard from './pages/Kanban'
+import { Phone } from 'lucide-react'
 
 const teachers = [
   {
@@ -65,6 +67,13 @@ const chats = [
   { id: 2, name: '🤖 AIプロジェクト' },
   { id: 3, name: '🎨 デザインチーム' },
   { id: 4, name: '📢 お知らせ' },
+]
+
+const allUsers = [
+  { id: 1, name: 'Taro', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Taro' },
+  { id: 2, name: 'You', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=You' },
+  { id: 3, name: 'Hanako', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Hanako' },
+  { id: 4, name: 'Alex', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Alex' },
 ]
 
 const dummyMessages = [
@@ -244,12 +253,302 @@ function ClassesPage() {
   )
 }
 
-function ChatsPage() {
-  const [activeChat, setActiveChat] = useState(chats[0])
+type User = {
+  id: number
+  name: string
+  avatar: string
+}
+
+export const CallModal: React.FC<{
+  open: boolean
+  onEnd: () => void
+  videoRef: React.RefObject<HTMLVideoElement | null>
+  participants: User[]
+  stream?: MediaStream | null
+  setParticipants: React.Dispatch<React.SetStateAction<User[]>>
+  remoteStreams: { [key: string]: MediaStream }
+}> = ({ open, onEnd, videoRef, participants, setParticipants, stream, remoteStreams }) => {
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [volume, setVolume] = useState(0)
+
+  const availableUsers = allUsers.filter((u) => !participants.some((p) => p.id === u.id))
+
+  const handleInvite = (user: User) => {
+    setParticipants((prev) => [...prev, user])
+    setInviteOpen(false)
+  }
+
+  useEffect(() => {
+    if (!stream) return
+    const audioCtx = new window.AudioContext()
+    const analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 256
+
+    const source = audioCtx.createMediaStreamSource(stream)
+    source.connect(analyser)
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+    let running = true
+    function tick() {
+      if (!running) return
+      analyser.getByteTimeDomainData(dataArray)
+      let sum = 0
+      for (let i = 0; i < dataArray.length; i++) {
+        const val = (dataArray[i] - 128) / 128
+        sum += val * val
+      }
+      setVolume(Math.min(Math.sqrt(sum / dataArray.length) * 2, 1))
+      requestAnimationFrame(tick)
+    }
+    tick()
+
+    return () => {
+      running = false
+      audioCtx.close()
+    }
+  }, [stream])
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/80"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.div
+            className="relative flex w-[90vw] max-w-[1200px] flex-col items-center rounded-2xl border border-neutral-700 bg-neutral-800 p-0 shadow-2xl"
+            initial={{ scale: 0.92 }}
+            animate={{ scale: 1 }}
+            exit={{ scale: 0.97 }}
+          >
+            <div className="z-30 flex w-full items-center justify-between rounded-t-2xl border-b border-neutral-700 bg-neutral-800 px-7 pt-5 pb-2">
+              <div className="flex items-center gap-5">
+                {participants.map((user) => (
+                  <div key={user.id} className="flex flex-col items-center">
+                    <span className="group relative">
+                      <span className="absolute -inset-1 rounded-full bg-gradient-to-tr from-blue-600 to-cyan-400 opacity-60 transition duration-200 group-hover:opacity-90"></span>
+                      <img
+                        src={user.avatar}
+                        alt={user.name}
+                        className="relative z-10 h-12 w-12 rounded-full border-2 border-neutral-700 object-cover shadow-lg transition group-hover:border-blue-400"
+                      />
+                    </span>
+                    <span className="mt-1 text-xs font-medium text-neutral-200">{user.name}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="relative">
+                <button
+                  className="cursor-pointer rounded-full bg-gradient-to-br from-blue-600 to-cyan-400 p-2 shadow-xl transition hover:scale-105"
+                  title="参加者を招待"
+                  onClick={() => setInviteOpen((o) => !o)}
+                >
+                  <svg width={22} height={22} fill="none" viewBox="0 0 24 24">
+                    <path d="M12 4v16m8-8H4" stroke="#fff" strokeWidth={2} strokeLinecap="round" />
+                  </svg>
+                </button>
+                {inviteOpen && (
+                  <div className="absolute right-0 z-10 mt-2 w-44 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-800 shadow-xl">
+                    {availableUsers.length === 0 ? (
+                      <div className="p-3 text-sm text-neutral-400">
+                        招待できるユーザーがいません
+                      </div>
+                    ) : (
+                      availableUsers.map((u) => (
+                        <button
+                          key={u.id}
+                          onClick={() => handleInvite(u)}
+                          className="flex w-full items-center gap-2 px-4 py-2 text-sm text-neutral-100 transition hover:bg-neutral-700"
+                        >
+                          <img
+                            src={u.avatar}
+                            className="h-7 w-7 rounded-full border border-neutral-700"
+                          />
+                          {u.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid w-full grid-cols-1 gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Local video */}
+              <div className="relative">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full rounded-xl border border-blue-700 bg-black shadow-xl"
+                  style={{
+                    aspectRatio: '16/9',
+                    objectFit: 'cover',
+                  }}
+                />
+                <div className="absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-sm text-white">
+                  You
+                </div>
+              </div>
+
+              {/* Remote videos */}
+              {Object.entries(remoteStreams).map(([userId, remoteStream]) => {
+                const participant = participants.find(p => p.id.toString() === userId)
+                const videoRef = useRef<HTMLVideoElement>(null)
+
+                useEffect(() => {
+                  if (videoRef.current && remoteStream) {
+                    videoRef.current.srcObject = remoteStream
+                  }
+                }, [remoteStream])
+
+                return (
+                  <div key={userId} className="relative">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      className="w-full rounded-xl border border-blue-700 bg-black shadow-xl"
+                      style={{
+                        aspectRatio: '16/9',
+                        objectFit: 'cover',
+                      }}
+                    />
+                    <div className="absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-sm text-white">
+                      {participant?.name || 'Unknown'}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <button
+              className="mb-8 cursor-pointer rounded-xl bg-gradient-to-tr from-red-600 to-rose-400 px-10 py-3 text-base font-semibold text-white shadow-lg transition hover:scale-105"
+              onClick={onEnd}
+            >
+              通話終了
+            </button>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+type Chat = {
+  id: number
+  name: string
+}
+
+const ChatsPage: React.FC = () => {
+  const [activeChat, setActiveChat] = useState<Chat>(chats[0])
+  const [callOpen, setCallOpen] = useState(false)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const localVideoRef = useRef<HTMLVideoElement>(null)
+  const remoteVideoRef = useRef<HTMLVideoElement>(null)
+  const peerConnection = useRef<RTCPeerConnection | null>(null)
+  const [isCaller, setIsCaller] = useState(false)
+
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream
+    }
+  }, [remoteStream])
+
+  const setupPeerConnection = () => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    })
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        // В реальном приложении здесь мы бы отправляли кандидата другому пиру через сервер
+        console.log('New ICE candidate:', event.candidate)
+      }
+    }
+
+    pc.ontrack = (event) => {
+      setRemoteStream(event.streams[0])
+    }
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream)
+      })
+    }
+
+    peerConnection.current = pc
+    return pc
+  }
+
+  const handleStartCall = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      setLocalStream(stream)
+      setCallOpen(true)
+      setIsCaller(true)
+
+      const pc = setupPeerConnection()
+      
+      // Создаем оффер (для демонстрации)
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      
+      // В реальном приложении здесь мы бы отправляли оффер другому пиру через сервер
+      console.log('Created offer:', offer)
+      
+    } catch (err) {
+      console.error('Error accessing media devices:', err)
+      alert('カメラまたはマイクにアクセスできません！')
+    }
+  }
+
+  const handleJoinCall = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      setLocalStream(stream)
+      setCallOpen(true)
+      setIsCaller(false)
+
+      const pc = setupPeerConnection()
+      
+      // В реальном приложении здесь мы бы получали оффер от другого пира и создавали ответ
+      // Для демонстрации просто показываем, что второй участник присоединился
+      console.log('Second participant joined')
+      
+    } catch (err) {
+      console.error('Error accessing media devices:', err)
+      alert('カメラまたはマイクにアクセスできません！')
+    }
+  }
+
+  const handleEndCall = () => {
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop())
+      setLocalStream(null)
+    }
+    if (peerConnection.current) {
+      peerConnection.current.close()
+      peerConnection.current = null
+    }
+    setRemoteStream(null)
+    setCallOpen(false)
+    setIsCaller(false)
+  }
 
   return (
     <div className="flex min-h-full w-full overflow-y-auto rounded-lg bg-white text-gray-900">
-      {/* Sidebar */}
       <aside className="w-64 space-y-2 border-r border-gray-200 bg-white p-4 shadow-md">
         <h2 className="mb-4 text-lg font-semibold">チャットルーム</h2>
         {chats.map((chat) => (
@@ -268,14 +567,27 @@ function ChatsPage() {
         ))}
       </aside>
 
-      {/* Chat window */}
       <main className="flex flex-1 flex-col bg-white shadow-inner">
-        {/* Header */}
-        <div className="border-b border-gray-200 bg-white px-6 py-4">
+        <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
           <h1 className="text-xl font-bold">{activeChat.name}</h1>
+          <div className="flex gap-2">
+            <button
+              className="flex cursor-pointer items-center gap-2 rounded-lg bg-green-500 px-4 py-2 text-white transition hover:bg-green-600"
+              onClick={handleStartCall}
+              disabled={callOpen}
+            >
+              <Phone width={20} /> 通話を開始
+            </button>
+            <button
+              className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-white transition hover:bg-blue-600"
+              onClick={handleJoinCall}
+              disabled={callOpen}
+            >
+              <Phone width={20} /> 通話に参加
+            </button>
+          </div>
         </div>
 
-        {/* Messages */}
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
           {dummyMessages.map((msg) => (
             <div key={msg.id} className="max-w-lg rounded-lg bg-gray-100 p-3">
@@ -285,7 +597,6 @@ function ChatsPage() {
           ))}
         </div>
 
-        {/* Input */}
         <div className="border-t border-gray-200 bg-white px-6 py-4">
           <div className="flex items-center space-x-2">
             <input
@@ -299,6 +610,69 @@ function ChatsPage() {
           </div>
         </div>
       </main>
+
+      {/* Video Call Modal */}
+      <AnimatePresence>
+        {callOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/80"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="relative flex w-[90vw] max-w-[1200px] flex-col items-center rounded-2xl border border-neutral-700 bg-neutral-800 p-6 shadow-2xl"
+              initial={{ scale: 0.92 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.97 }}
+            >
+              <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+                {/* Local video */}
+                <div className="relative">
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full rounded-xl border border-blue-700 bg-black shadow-xl"
+                    style={{
+                      aspectRatio: '16/9',
+                      objectFit: 'cover',
+                    }}
+                  />
+                  <div className="absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-sm text-white">
+                    You ({isCaller ? 'Caller' : 'Participant'})
+                  </div>
+                </div>
+
+                {/* Remote video */}
+                <div className="relative">
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                    className="w-full rounded-xl border border-blue-700 bg-black shadow-xl"
+                    style={{
+                      aspectRatio: '16/9',
+                      objectFit: 'cover',
+                    }}
+                  />
+                  <div className="absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-sm text-white">
+                    Remote User
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="mt-6 cursor-pointer rounded-xl bg-gradient-to-tr from-red-600 to-rose-400 px-10 py-3 text-base font-semibold text-white shadow-lg transition hover:scale-105"
+                onClick={handleEndCall}
+              >
+                通話終了
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -348,7 +722,6 @@ function Home() {
   return (
     <div className="flex w-full flex-col gap-5 overflow-y-auto rounded-lg bg-white p-5">
       <div className="min-h-screen bg-black font-sans text-white">
-        {/* Hero section */}
         <div
           className="relative h-[80vh] bg-cover bg-center"
           style={{
@@ -524,7 +897,6 @@ function About() {
   return (
     <div className="flex w-full flex-col gap-5 overflow-y-auto rounded-lg bg-white p-5">
       <div className="bg-gray-50 font-sans text-gray-900">
-        {/* Hero section */}
         <div
           className="relative h-72 w-full bg-cover bg-center"
           style={{
@@ -540,7 +912,6 @@ function About() {
           </div>
         </div>
 
-        {/* About section */}
         <div className="mx-auto max-w-5xl px-6 py-12">
           <h2 className="mb-4 text-2xl font-semibold">学校について</h2>
           <p className="mb-6 text-lg leading-8">
@@ -550,7 +921,6 @@ function About() {
             本校は新宿の中心に位置し、アクセスも便利。国内外の学生が共に学び、国際的な視野を広げることができます。経験豊かな講師陣による指導と実践的なプロジェクトを通じて、学生一人ひとりの可能性を最大限に引き出します。
           </p>
 
-          {/* School Features */}
           <div className="mb-10 grid gap-6 md:grid-cols-3">
             <div className="rounded-lg bg-white p-6 shadow">
               <h3 className="mb-2 text-xl font-bold">AI専攻</h3>
@@ -566,7 +936,6 @@ function About() {
             </div>
           </div>
 
-          {/* Map */}
           <h2 className="mb-4 text-2xl font-semibold">所在地</h2>
           <p className="mb-4">〒160-0023 東京都新宿区西新宿1丁目1−1</p>
           <div className="h-96 w-full overflow-hidden rounded-lg shadow">
@@ -604,7 +973,9 @@ function App() {
           <Route path="/top-students" element={<TopStudentsPage />} />
           <Route path="/homeworks" element={<Homeworks />} />
           <Route path="/courses" element={<Courses />} />
+          <Route path="/kanban" element={<KanbanBoard />} />
           <Route path="/courses/:id" element={<Course />} />
+          <Route path="/resume" element={<Resume />} />
         </Routes>
       </div>
     </Router>
