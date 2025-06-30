@@ -460,27 +460,37 @@ const ChatsPage: React.FC = () => {
     const handleStorage = async (event: StorageEvent) => {
       if (!event.newValue) return
 
+      console.log('Storage event:', event.key, JSON.parse(event.newValue))
       const data = JSON.parse(event.newValue)
       
       if (event.key === 'offer' && !isCaller) {
+        console.log('Received offer, setting up peer connection')
         const pc = setupPeerConnection()
+        console.log('Setting remote description (offer)')
         await pc.setRemoteDescription(new RTCSessionDescription(data))
+        console.log('Creating answer')
         const answer = await pc.createAnswer()
+        console.log('Setting local description (answer)')
         await pc.setLocalDescription(answer)
+        console.log('Storing answer in localStorage')
         localStorage.setItem('answer', JSON.stringify(answer))
       }
       
       if (event.key === 'answer' && isCaller) {
+        console.log('Received answer, setting remote description')
         const pc = peerConnection.current
         if (pc) {
           await pc.setRemoteDescription(new RTCSessionDescription(data))
+          console.log('Remote description set successfully')
         }
       }
 
       if (event.key === 'ice-candidate') {
+        console.log('Received ICE candidate')
         const pc = peerConnection.current
         if (pc) {
           await pc.addIceCandidate(new RTCIceCandidate(data))
+          console.log('ICE candidate added successfully')
         }
       }
     }
@@ -490,24 +500,45 @@ const ChatsPage: React.FC = () => {
   }, [isCaller])
 
   const setupPeerConnection = () => {
+    console.log('Setting up new peer connection')
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     })
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log('New ICE candidate:', event.candidate)
         localStorage.setItem('ice-candidate', JSON.stringify(event.candidate))
       }
     }
 
     pc.ontrack = (event) => {
       console.log('Received remote stream:', event.streams[0])
+      console.log('Remote stream tracks:', event.streams[0].getTracks())
       setRemoteStream(event.streams[0])
     }
 
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE connection state:', pc.iceConnectionState)
+    }
+
+    pc.onicegatheringstatechange = () => {
+      console.log('ICE gathering state:', pc.iceGatheringState)
+    }
+
+    pc.onsignalingstatechange = () => {
+      console.log('Signaling state:', pc.signalingState)
+    }
+
+    pc.onconnectionstatechange = () => {
+      console.log('Connection state:', pc.connectionState)
+    }
+
     if (localStream) {
+      console.log('Adding local stream tracks to peer connection')
       localStream.getTracks().forEach(track => {
         pc.addTrack(track, localStream)
+        console.log('Added track:', track.kind)
       })
     }
 
@@ -517,12 +548,15 @@ const ChatsPage: React.FC = () => {
 
   const handleStartCall = async () => {
     try {
+      console.log('Starting call as caller')
       // Очищаем предыдущие сигнальные данные
       localStorage.removeItem('offer')
       localStorage.removeItem('answer')
       localStorage.removeItem('ice-candidate')
 
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      console.log('Got local stream:', stream)
+      console.log('Local stream tracks:', stream.getTracks())
       setLocalStream(stream)
       setCallOpen(true)
       setIsCaller(true)
@@ -530,19 +564,25 @@ const ChatsPage: React.FC = () => {
       const pc = setupPeerConnection()
       
       // Создаем и отправляем оффер
+      console.log('Creating offer')
       const offer = await pc.createOffer()
+      console.log('Setting local description (offer)')
       await pc.setLocalDescription(offer)
+      console.log('Storing offer in localStorage')
       localStorage.setItem('offer', JSON.stringify(offer))
       
     } catch (err) {
-      console.error('Error accessing media devices:', err)
+      console.error('Error in handleStartCall:', err)
       alert('カメラまたはマイクにアクセスできません！')
     }
   }
 
   const handleJoinCall = async () => {
     try {
+      console.log('Joining call as participant')
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      console.log('Got local stream:', stream)
+      console.log('Local stream tracks:', stream.getTracks())
       setLocalStream(stream)
       setCallOpen(true)
       setIsCaller(false)
@@ -550,21 +590,27 @@ const ChatsPage: React.FC = () => {
       // Получаем существующий оффер
       const offerStr = localStorage.getItem('offer')
       if (!offerStr) {
+        console.warn('No offer found in localStorage')
         alert('通話が見つかりません。先に通話を開始してください。')
         return
       }
 
+      console.log('Found offer in localStorage')
       const pc = setupPeerConnection()
       const offer = JSON.parse(offerStr)
       
       // Устанавливаем удаленное описание и создаем ответ
+      console.log('Setting remote description (offer)')
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
+      console.log('Creating answer')
       const answer = await pc.createAnswer()
+      console.log('Setting local description (answer)')
       await pc.setLocalDescription(answer)
+      console.log('Storing answer in localStorage')
       localStorage.setItem('answer', JSON.stringify(answer))
       
     } catch (err) {
-      console.error('Error accessing media devices:', err)
+      console.error('Error in handleJoinCall:', err)
       alert('カメラまたはマイクにアクセスできません！')
     }
   }
