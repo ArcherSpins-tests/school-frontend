@@ -270,6 +270,7 @@ export const CallModal: React.FC<{
 }> = ({ open, onEnd, videoRef, participants, setParticipants, stream, remoteStreams }) => {
   const [inviteOpen, setInviteOpen] = useState(false)
   const [volume, setVolume] = useState(0)
+  console.log(volume)
 
   const availableUsers = allUsers.filter((u) => !participants.some((p) => p.id === u.id))
 
@@ -521,7 +522,7 @@ const ChatsPage: React.FC = () => {
       setCallOpen(true)
       setIsCaller(false)
 
-      const pc = setupPeerConnection()
+      setupPeerConnection()
       
       // В реальном приложении здесь мы бы получали оффер от другого пира и создавали ответ
       // Для демонстрации просто показываем, что второй участник присоединился
