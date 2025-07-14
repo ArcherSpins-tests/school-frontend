@@ -2,7 +2,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AuthPage, Course, Courses, Homeworks, Resume, Students } from './pages'
 import { Sidebar } from './components'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import KanbanBoard from './pages/Kanban'
 import { Phone } from 'lucide-react'
@@ -449,168 +449,276 @@ const ChatsPage: React.FC = () => {
   const [activeChat, setActiveChat] = useState<Chat>(chats[0])
   const [callOpen, setCallOpen] = useState(false)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const [participants, setParticipants] = useState<Array<{
+    id: string
+    name: string
+    stream: MediaStream | null
+    isLocal: boolean
+  }>>([])
+  const [userId] = useState(() => `user_${Math.random().toString(36).substr(2, 9)}`)
+  const [userName] = useState(() => `ユーザー${Math.floor(Math.random() * 1000) + 1}`)
+  const [isInCall, setIsInCall] = useState(false)
   const localVideoRef = useRef<HTMLVideoElement>(null)
-  const remoteVideoRef = useRef<HTMLVideoElement>(null)
-  const peerConnection = useRef<RTCPeerConnection | null>(null)
-  const [isCaller, setIsCaller] = useState(false)
+  const remoteVideoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({})
+  const [socket, setSocket] = useState<WebSocket | null>(null)
+  const [clientId, setClientId] = useState<string>('')
+  const peerConnections = useRef<{ [key: string]: RTCPeerConnection }>({})
+  const roomId = 'video_call_room'
 
-  // Слушаем изменения в localStorage для обмена сигналами
+  // Фиксируем мерцание камеры
   useEffect(() => {
-    const handleStorage = async (event: StorageEvent) => {
-      if (!event.newValue) return
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
 
-      console.log('Storage event:', event.key, JSON.parse(event.newValue))
-      const data = JSON.parse(event.newValue)
-      
-      if (event.key === 'offer' && !isCaller) {
-        console.log('Received offer, setting up peer connection')
-        const pc = setupPeerConnection()
-        console.log('Setting remote description (offer)')
-        await pc.setRemoteDescription(new RTCSessionDescription(data))
-        console.log('Creating answer')
-        const answer = await pc.createAnswer()
-        console.log('Setting local description (answer)')
-        await pc.setLocalDescription(answer)
-        console.log('Storing answer in localStorage')
-        localStorage.setItem('answer', JSON.stringify(answer))
-      }
-      
-      if (event.key === 'answer' && isCaller) {
-        console.log('Received answer, setting remote description')
-        const pc = peerConnection.current
-        if (pc) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data))
-          console.log('Remote description set successfully')
-        }
-      }
+  // Подключаемся к WebSocket серверу
+  useEffect(() => {
+    const ws = new WebSocket('wss://chat-server-production-826f.up.railway.app')
+    
+    ws.onopen = () => {
+      console.log('Connected to WebSocket server')
+      setSocket(ws)
+    }
 
-      if (event.key === 'ice-candidate') {
-        console.log('Received ICE candidate')
-        const pc = peerConnection.current
-        if (pc) {
-          await pc.addIceCandidate(new RTCIceCandidate(data))
-          console.log('ICE candidate added successfully')
+    ws.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        console.log('Received message:', data)
+
+        switch (data.type) {
+          case 'client_id':
+            setClientId(data.clientId)
+            break
+
+          case 'user_joined':
+            if (data.clientId !== clientId && isInCall) {
+              console.log('New user joined:', data.userName)
+              await createPeerConnection(data.clientId)
+            }
+            setParticipants(data.participants.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              stream: null,
+              isLocal: false
+            })))
+            break
+
+          case 'user_left':
+            if (peerConnections.current[data.clientId]) {
+              peerConnections.current[data.clientId].close()
+              delete peerConnections.current[data.clientId]
+            }
+            setParticipants(data.participants.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              stream: null,
+              isLocal: false
+            })))
+            break
+
+          case 'offer':
+            if (data.from !== clientId && isInCall) {
+              await handleOffer(data.from, data.offer)
+            }
+            break
+
+          case 'answer':
+            if (data.from !== clientId && isInCall) {
+              await handleAnswer(data.from, data.answer)
+            }
+            break
+
+          case 'ice_candidate':
+            if (data.from !== clientId && isInCall) {
+              await handleIceCandidate(data.from, data.candidate)
+            }
+            break
         }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error)
       }
     }
 
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [isCaller])
+    ws.onclose = () => {
+      console.log('Disconnected from WebSocket server')
+      setSocket(null)
+    }
 
-  const setupPeerConnection = () => {
-    console.log('Setting up new peer connection')
+    return () => {
+      ws.close()
+    }
+  }, [])
+
+  const createPeerConnection = async (targetId: string) => {
+    if (!localStream) return
+
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
     })
 
+    // Добавляем локальный стрим
+    localStream.getTracks().forEach(track => {
+      pc.addTrack(track, localStream)
+    })
+
+    // Обработка ICE кандидатов
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log('New ICE candidate:', event.candidate)
-        localStorage.setItem('ice-candidate', JSON.stringify(event.candidate))
+        socket?.send(JSON.stringify({
+          type: 'ice_candidate',
+          roomId: roomId,
+          targetId: targetId,
+          candidate: event.candidate
+        }))
       }
     }
 
+    // Обработка удаленного стрима
     pc.ontrack = (event) => {
-      console.log('Received remote stream:', event.streams[0])
-      console.log('Remote stream tracks:', event.streams[0].getTracks())
-      setRemoteStream(event.streams[0])
+      console.log('Received remote stream from:', targetId)
+      setParticipants(prev => prev.map(p => 
+        p.id === targetId ? { ...p, stream: event.streams[0] } : p
+      ))
     }
 
-    pc.oniceconnectionstatechange = () => {
-      console.log('ICE connection state:', pc.iceConnectionState)
-    }
+    peerConnections.current[targetId] = pc
 
-    pc.onicegatheringstatechange = () => {
-      console.log('ICE gathering state:', pc.iceGatheringState)
-    }
+    // Создаем оффер
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
 
-    pc.onsignalingstatechange = () => {
-      console.log('Signaling state:', pc.signalingState)
-    }
+    socket?.send(JSON.stringify({
+      type: 'offer',
+      roomId: roomId,
+      targetId: targetId,
+      offer: offer
+    }))
 
-    pc.onconnectionstatechange = () => {
-      console.log('Connection state:', pc.connectionState)
-    }
-
-    if (localStream) {
-      console.log('Adding local stream tracks to peer connection')
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream)
-        console.log('Added track:', track.kind)
-      })
-    }
-
-    peerConnection.current = pc
     return pc
+  }
+
+  const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
+    if (!localStream) return
+
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    })
+
+    // Добавляем локальный стрим
+    localStream.getTracks().forEach(track => {
+      pc.addTrack(track, localStream)
+    })
+
+    // Обработка ICE кандидатов
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket?.send(JSON.stringify({
+          type: 'ice_candidate',
+          roomId: roomId,
+          targetId: fromId,
+          candidate: event.candidate
+        }))
+      }
+    }
+
+    // Обработка удаленного стрима
+    pc.ontrack = (event) => {
+      console.log('Received remote stream from:', fromId)
+      setParticipants(prev => prev.map(p => 
+        p.id === fromId ? { ...p, stream: event.streams[0] } : p
+      ))
+    }
+
+    peerConnections.current[fromId] = pc
+
+    // Устанавливаем удаленное описание и создаем ответ
+    await pc.setRemoteDescription(new RTCSessionDescription(offer))
+    const answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    socket?.send(JSON.stringify({
+      type: 'answer',
+      roomId: roomId,
+      targetId: fromId,
+      answer: answer
+    }))
+  }
+
+  const handleAnswer = async (fromId: string, answer: RTCSessionDescriptionInit) => {
+    const pc = peerConnections.current[fromId]
+    if (pc) {
+      await pc.setRemoteDescription(new RTCSessionDescription(answer))
+    }
+  }
+
+  const handleIceCandidate = async (fromId: string, candidate: RTCIceCandidateInit) => {
+    const pc = peerConnections.current[fromId]
+    if (pc) {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate))
+    }
   }
 
   const handleStartCall = async () => {
     try {
-      console.log('Starting call as caller')
-      // Очищаем предыдущие сигнальные данные
-      localStorage.removeItem('offer')
-      localStorage.removeItem('answer')
-      localStorage.removeItem('ice-candidate')
-
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      console.log('Got local stream:', stream)
-      console.log('Local stream tracks:', stream.getTracks())
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }, 
+        audio: true 
+      })
+      
       setLocalStream(stream)
       setCallOpen(true)
-      setIsCaller(true)
+      setIsInCall(true)
 
-      const pc = setupPeerConnection()
-      
-      // Создаем и отправляем оффер
-      console.log('Creating offer')
-      const offer = await pc.createOffer()
-      console.log('Setting local description (offer)')
-      await pc.setLocalDescription(offer)
-      console.log('Storing offer in localStorage')
-      localStorage.setItem('offer', JSON.stringify(offer))
+      // Присоединяемся к комнате
+      socket?.send(JSON.stringify({
+        type: 'join_room',
+        roomId: roomId,
+        userName: userName
+      }))
+
+      console.log(`Started call as ${userName} (${clientId})`)
       
     } catch (err) {
-      console.error('Error in handleStartCall:', err)
+      console.error('Error accessing media devices:', err)
       alert('カメラまたはマイクにアクセスできません！')
     }
   }
 
   const handleJoinCall = async () => {
     try {
-      console.log('Joining call as participant')
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      console.log('Got local stream:', stream)
-      console.log('Local stream tracks:', stream.getTracks())
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }, 
+        audio: true 
+      })
+      
       setLocalStream(stream)
       setCallOpen(true)
-      setIsCaller(false)
+      setIsInCall(true)
 
-      // Получаем существующий оффер
-      const offerStr = localStorage.getItem('offer')
-      if (!offerStr) {
-        console.warn('No offer found in localStorage')
-        alert('通話が見つかりません。先に通話を開始してください。')
-        return
-      }
+      // Присоединяемся к комнате
+      socket?.send(JSON.stringify({
+        type: 'join_room',
+        roomId: roomId,
+        userName: userName
+      }))
 
-      console.log('Found offer in localStorage')
-      const pc = setupPeerConnection()
-      const offer = JSON.parse(offerStr)
-      
-      // Устанавливаем удаленное описание и создаем ответ
-      console.log('Setting remote description (offer)')
-      await pc.setRemoteDescription(new RTCSessionDescription(offer))
-      console.log('Creating answer')
-      const answer = await pc.createAnswer()
-      console.log('Setting local description (answer)')
-      await pc.setLocalDescription(answer)
-      console.log('Storing answer in localStorage')
-      localStorage.setItem('answer', JSON.stringify(answer))
+      console.log(`Joined call as ${userName} (${clientId})`)
       
     } catch (err) {
-      console.error('Error in handleJoinCall:', err)
+      console.error('Error accessing media devices:', err)
       alert('カメラまたはマイクにアクセスできません！')
     }
   }
@@ -620,32 +728,24 @@ const ChatsPage: React.FC = () => {
       localStream.getTracks().forEach(track => track.stop())
       setLocalStream(null)
     }
-    if (peerConnection.current) {
-      peerConnection.current.close()
-      peerConnection.current = null
-    }
-    setRemoteStream(null)
+    
+    // Закрываем все peer connections
+    Object.values(peerConnections.current).forEach(pc => pc.close())
+    peerConnections.current = {}
+    
     setCallOpen(false)
-    setIsCaller(false)
-
-    // Очищаем сигнальные данные
-    localStorage.removeItem('offer')
-    localStorage.removeItem('answer')
-    localStorage.removeItem('ice-candidate')
+    setIsInCall(false)
+    setParticipants([])
+    
+    // Покидаем комнату
+    socket?.send(JSON.stringify({
+      type: 'leave_room',
+      roomId: roomId
+    }))
   }
 
-  // Add back video ref effects
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream
-    }
-  }, [localStream])
-
-  useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream
-    }
-  }, [remoteStream])
+  // Получаем общее количество участников
+  const totalParticipants = participants.length + 1 // +1 для локального пользователя
 
   return (
     <div className="flex min-h-full w-full overflow-y-auto rounded-lg bg-white text-gray-900">
@@ -670,21 +770,29 @@ const ChatsPage: React.FC = () => {
       <main className="flex flex-1 flex-col bg-white shadow-inner">
         <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
           <h1 className="text-xl font-bold">{activeChat.name}</h1>
-          <div className="flex gap-2">
-            <button
-              className="flex cursor-pointer items-center gap-2 rounded-lg bg-green-500 px-4 py-2 text-white transition hover:bg-green-600"
-              onClick={handleStartCall}
-              disabled={callOpen}
-            >
-              <Phone width={20} /> 通話を開始
-            </button>
-            <button
-              className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-white transition hover:bg-blue-600"
-              onClick={handleJoinCall}
-              disabled={callOpen}
-            >
-              <Phone width={20} /> 通話に参加
-            </button>
+          <div className="flex items-center gap-4">
+            {isInCall && (
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                <span>参加者: {totalParticipants}人</span>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                className="flex cursor-pointer items-center gap-2 rounded-lg bg-green-500 px-4 py-2 text-white transition hover:bg-green-600 disabled:opacity-50"
+                onClick={handleStartCall}
+                disabled={isInCall || !socket}
+              >
+                <Phone width={20} /> 通話を開始
+              </button>
+              <button
+                className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-white transition hover:bg-blue-600 disabled:opacity-50"
+                onClick={handleJoinCall}
+                disabled={isInCall || !socket}
+              >
+                <Phone width={20} /> 通話に参加
+              </button>
+            </div>
           </div>
         </div>
 
@@ -721,12 +829,30 @@ const ChatsPage: React.FC = () => {
             exit={{ opacity: 0 }}
           >
             <motion.div
-              className="relative flex w-[90vw] max-w-[1200px] flex-col items-center rounded-2xl border border-neutral-700 bg-neutral-800 p-6 shadow-2xl"
+              className="relative flex w-[95vw] max-w-[1400px] flex-col items-center rounded-2xl border border-neutral-700 bg-neutral-800 p-6 shadow-2xl"
               initial={{ scale: 0.92 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.97 }}
             >
-              <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+              {/* Header with participant count */}
+              <div className="mb-4 flex w-full items-center justify-between">
+                <h2 className="text-xl font-bold text-white">ビデオ通話</h2>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 text-sm text-gray-300">
+                    <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                    <span>参加者: {totalParticipants}人</span>
+                  </div>
+                  <button
+                    className="cursor-pointer rounded-xl bg-gradient-to-tr from-red-600 to-rose-400 px-6 py-2 text-sm font-semibold text-white shadow-lg transition hover:scale-105"
+                    onClick={handleEndCall}
+                  >
+                    通話終了
+                  </button>
+                </div>
+              </div>
+
+              {/* Video Grid */}
+              <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                 {/* Local video */}
                 <div className="relative">
                   <video
@@ -741,34 +867,46 @@ const ChatsPage: React.FC = () => {
                     }}
                   />
                   <div className="absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-sm text-white">
-                    You ({isCaller ? 'Caller' : 'Participant'})
+                    {userName} (あなた)
                   </div>
                 </div>
 
-                {/* Remote video */}
-                <div className="relative">
-                  <video
-                    ref={remoteVideoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full rounded-xl border border-blue-700 bg-black shadow-xl"
-                    style={{
-                      aspectRatio: '16/9',
-                      objectFit: 'cover',
-                    }}
-                  />
-                  <div className="absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-sm text-white">
-                    Remote User
+                {/* Remote participants */}
+                {participants.map((participant, index) => (
+                  <div key={participant.id} className="relative">
+                    <video
+                      ref={(el) => {
+                        remoteVideoRefs.current[participant.id] = el
+                        if (el && participant.stream) {
+                          el.srcObject = participant.stream
+                        }
+                      }}
+                      autoPlay
+                      playsInline
+                      className="w-full rounded-xl border border-blue-700 bg-black shadow-xl"
+                      style={{
+                        aspectRatio: '16/9',
+                        objectFit: 'cover',
+                      }}
+                    />
+                    <div className="absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-sm text-white">
+                      {participant.name}
+                    </div>
                   </div>
-                </div>
+                ))}
+
+                {/* Placeholder for additional participants */}
+                {Array.from({ length: Math.max(0, 30 - totalParticipants) }).map((_, index) => (
+                  <div key={`placeholder-${index}`} className="relative">
+                    <div className="flex h-full w-full items-center justify-center rounded-xl border border-gray-600 bg-gray-800">
+                      <div className="text-center text-gray-400">
+                        <div className="mb-2 text-2xl">👤</div>
+                        <div className="text-sm">待機中</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-
-              <button
-                className="mt-6 cursor-pointer rounded-xl bg-gradient-to-tr from-red-600 to-rose-400 px-10 py-3 text-base font-semibold text-white shadow-lg transition hover:scale-105"
-                onClick={handleEndCall}
-              >
-                通話終了
-              </button>
             </motion.div>
           </motion.div>
         )}

@@ -1,54 +1,49 @@
-# React + TypeScript + Vite
+# 東京マルチAI専門学校 - Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Установка и запуск
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+### 1. Установка зависимостей фронтенда
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 2. Запуск WebSocket сервера (в отдельном терминале)
+```bash
+cd server
+npm install
+node server.js
+```
+Сервер будет доступен на `ws://localhost:8080`
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### 3. Запуск фронтенда (в новом терминале)
+```bash
+npm run dev
+```
+Фронтенд будет доступен на `http://localhost:5173`
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
+## Функциональность
+
+### Видео-чат
+- Поддержка до 30 участников
+- WebRTC peer-to-peer соединения
+- Уникальные пользователи для каждой вкладки/устройства
+- Японские имена пользователей (ユーザー1, ユーザー2, и т.д.)
+- Адаптивная сетка видео
+
+### Как тестировать видео-чат:
+1. Запустите сервер и фронтенд
+2. Откройте несколько вкладок браузера
+3. В первой вкладке нажмите "通話を開始" (Начать звонок)
+4. В других вкладках нажмите "通話に参加" (Присоединиться к звонку)
+5. Каждый пользователь увидит видео других участников
+
+## Структура проекта
+
+```
+frontend/
+├── src/                 # React приложение
+├── server/              # WebSocket сервер для WebRTC
+│   ├── server.js        # Основной файл сервера
+│   └── package.json     # Зависимости сервера
+└── package.json         # Зависимости фронтенда
 ```
